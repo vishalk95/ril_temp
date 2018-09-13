@@ -25,6 +25,8 @@
 #include <errno.h>
 
 #include <telephony/ril.h>
+#include <telephony/mtk_ril.h>
+
 #define LOG_TAG "RILD"
 #include <log/log.h>
 #include <cutils/properties.h>
@@ -71,15 +73,25 @@ extern void RIL_onUnsolicitedResponse(int unsolResponse, const void *data,
 extern void RIL_requestTimedCallback (RIL_TimedCallback callback,
         void *param, const struct timeval *relativeTime);
 
+//MTK
+extern void RIL_requestProxyTimedCallback (RIL_TimedCallback callback,
+                               void *param, const struct timeval *relativeTime, int proxyId);
+extern RILChannelId RIL_queryMyChannelId(RIL_Token t);
+extern int RIL_queryMyProxyIdByThread();
+//MTK
 
 static struct RIL_Env s_rilEnv = {
     RIL_onRequestComplete,
     RIL_onUnsolicitedResponse,
     RIL_requestTimedCallback,
     RIL_onRequestAck
+    ,RIL_requestProxyTimedCallback
+    ,RIL_queryMyChannelId
+    ,RIL_queryMyProxyIdByThread
 };
 
 extern void RIL_startEventLoop();
+int mtkInit();
 
 static int make_argv(char * args, char ** argv) {
     // Note: reserve argv[0]
@@ -122,6 +134,8 @@ int main(int argc, char **argv) {
     RLOGD("**RIL Daemon Started**");
     RLOGD("**RILd param count=%d**", argc);
 
+    if (mtkInit() == -1) goto done;
+
     umask(S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH);
     for (i = 1; i < argc ;) {
         if (0 == strcmp(argv[i], "-l") && (argc - i > 1)) {
@@ -152,7 +166,7 @@ int main(int argc, char **argv) {
     }
 
     if (rilLibPath == NULL) {
-        if ( 0 == property_get(LIB_PATH_PROPERTY, libPath, NULL)) {
+        if ( 0 == property_get(LIB_PATH_PROPERTY, libPath, "/system/lib/mtk-ril.so")) {
             // No lib sepcified on the command line, and nothing set in props.
             // Assume "no-ril" case.
             goto done;
@@ -197,7 +211,7 @@ int main(int argc, char **argv) {
         static char * newArgv[MAX_LIB_ARGS];
         static char args[PROPERTY_VALUE_MAX];
         rilArgv = newArgv;
-        property_get(LIB_ARGS_PROPERTY, args, "");
+        property_get(LIB_ARGS_PROPERTY, args, "-d /dev/ttyC0");
         argc = make_argv(args, rilArgv);
     }
 
