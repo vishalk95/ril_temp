@@ -15,7 +15,7 @@
  */
 
 #ifndef ANDROID_RIL_H
-#define ANDROID_RIL_H 1
+#define ANDROID_RIL_H
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -91,7 +91,7 @@ extern "C" {
  *                    RIL_REQUEST_STOP_NETWORK_SCAN
  *                    RIL_UNSOL_NETWORK_SCAN_RESULT
  */
-#define RIL_VERSION 12
+#define RIL_VERSION 15  // MTK RILD version
 #define LAST_IMPRECISE_RIL_VERSION 12 // Better self-documented name
 #define RIL_VERSION_MIN 6 /* Minimum RIL_VERSION supported */
 
@@ -99,9 +99,9 @@ extern "C" {
 #define CDMA_NUMBER_INFO_BUFFER_LENGTH 81
 
 #define MAX_RILDS 3
-#define MAX_SERVICE_NAME_LENGTH 6
+#define MAX_SERVICE_NAME_LENGTH 20
 #define MAX_CLIENT_ID_LENGTH 2
-#define MAX_DEBUG_SOCKET_NAME_LENGTH 12
+#define MAX_DEBUG_SOCKET_NAME_LENGTH 20
 #define MAX_QEMU_PIPE_NAME_LENGTH  11
 #define MAX_UUID_LENGTH 64
 #define MAX_BANDS 8
@@ -113,18 +113,11 @@ typedef void * RIL_Token;
 
 typedef enum {
     RIL_SOCKET_1,
-#if (SIM_COUNT >= 2)
     RIL_SOCKET_2,
-#if (SIM_COUNT >= 3)
     RIL_SOCKET_3,
-#endif
-#if (SIM_COUNT >= 4)
     RIL_SOCKET_4,
-#endif
-#endif
     RIL_SOCKET_NUM
 } RIL_SOCKET_ID;
-
 
 typedef enum {
     RIL_E_SUCCESS = 0,
@@ -223,7 +216,29 @@ typedef enum {
     RIL_E_OEM_ERROR_22 = 522,
     RIL_E_OEM_ERROR_23 = 523,
     RIL_E_OEM_ERROR_24 = 524,
-    RIL_E_OEM_ERROR_25 = 525
+    RIL_E_OEM_ERROR_25 = 525,
+    // MTK add
+    RIL_E_DIAL_STRING_TOO_LONG = 1001,
+    RIL_E_TEXT_STRING_TOO_LONG = 1002,
+    RIL_E_SIM_MEM_FULL = 1003,
+
+    RIL_E_EXTERNAL_APP_CAUSE_BEGIN = 2000,
+    RIL_E_BT_SAP_UNDEFINED = 2001,
+    RIL_E_BT_SAP_NOT_ACCESSIBLE = 2002,
+    RIL_E_BT_SAP_CARD_REMOVED = 2003,
+    RIL_E_BT_SAP_UIM_NOT_INSERTED = 2004,
+    RIL_E_BT_SAP_ERROR_NO_REASON_DEFINED = 2005,
+    /// @}
+
+    // MTK-START: SIM TMO RSU
+    RIL_E_VERIFICATION_FAILED = 3000,
+    RIL_E_REBOOT_REQUEST = 3001,
+    // MTK-END
+
+    // Power on start
+    RIL_E_POWER_ON_UIM_NOT_READY = 7000,
+    // Power on end
+    // MTK end
 } RIL_Errno;
 
 typedef enum {
@@ -547,6 +562,9 @@ typedef struct {
     int             mtu;        /* MTU received from network
                                    Value <= 0 means network has either not sent a value or
                                    sent an invalid value */
+    int eran_type;              /* 0: UNSPEC, 1: MOBILE_3GPP, 2: WIFI, 3: MOBILE_3GPP2
+                                   4: TYPE_MAX, 0xFE: RDS_RAN_NONE, 0xFF: RDS_RAN_DENY */
+
 } RIL_Data_Call_Response_v11;
 
 typedef enum {
@@ -688,6 +706,32 @@ typedef struct {
 }RIL_CallForwardInfo;
 
 typedef struct {
+    int             status;     /*
+                                 * For RIL_REQUEST_QUERY_CALL_FORWARD_STATUS
+                                 * status 1 = active, 0 = not active
+                                 *
+                                 * For RIL_REQUEST_SET_CALL_FORWARD:
+                                 * status is:
+                                 * 0 = disable
+                                 * 1 = enable
+                                 * 2 = interrogate
+                                 * 3 = registeration
+                                 * 4 = erasure
+                                 */
+
+    int             reason;      /* from TS 27.007 7.11 "reason" */
+    int             serviceClass;/* From 27.007 +CCFC/+CLCK "class"
+                                    See table for Android mapping from
+                                    MMI service code
+                                    0 means user doesn't input class */
+    int             toa;         /* "type" from TS 27.007 7.11 */
+    char *          number;      /* "number" from TS 27.007 7.11. May be NULL */
+    int             timeSeconds; /* for CF no reply only */
+    char *          timeSlotBegin;
+    char *          timeSlotEnd;
+}RIL_CallForwardInfoEx;
+
+typedef struct {
    char * cid;         /* Combination of LAC and Cell Id in 32 bits in GSM.
                         * Upper 16 bits is LAC and lower 16 bits
                         * is CID (as described in TS 27.005)
@@ -733,7 +777,7 @@ typedef struct {
     const char * mcc;
     const char * mnc;
     RIL_CarrierMatchType match_type;   /* Specify match type for the carrier.
-                                        * If it’s RIL_MATCH_ALL, match_data is null;
+                                        * If it??s RIL_MATCH_ALL, match_data is null;
                                         * otherwise, match_data is the value for the match type.
                                         */
     const char * match_data;
@@ -889,6 +933,7 @@ typedef enum {
        cases for error notification and potential retries. */
     PDP_FAIL_OPERATOR_BARRED = 0x08,               /* no retry */
     PDP_FAIL_NAS_SIGNALLING = 0x0E,
+    PDP_FAIL_MBMS_CAPABILITIES_INSUFFICIENT = 0x18,  /* M */
     PDP_FAIL_LLC_SNDCP = 0x19,
     PDP_FAIL_INSUFFICIENT_RESOURCES = 0x1A,
     PDP_FAIL_MISSING_UKNOWN_APN = 0x1B,            /* no retry */
@@ -912,12 +957,18 @@ typedef enum {
     PDP_FAIL_FILTER_SEMANTIC_ERROR = 0x2C,
     PDP_FAIL_FILTER_SYTAX_ERROR = 0x2D,
     PDP_FAIL_PDP_WITHOUT_ACTIVE_TFT = 0x2E,
+    PDP_FAIL_MULTICAST_GROUP_MEMBERSHIP_TIMEOUT = 0x2F,  /* M */
+    PDP_FAIL_BCM_VIOLATION = 0x30,  /* M */
+    PDP_FAIL_LAST_PDN_DISC_NOT_ALLOWED = 0x31,  /* M */
     PDP_FAIL_ONLY_IPV4_ALLOWED = 0x32,             /* no retry */
     PDP_FAIL_ONLY_IPV6_ALLOWED = 0x33,             /* no retry */
     PDP_FAIL_ONLY_SINGLE_BEARER_ALLOWED = 0x34,
     PDP_FAIL_ESM_INFO_NOT_RECEIVED = 0x35,
     PDP_FAIL_PDN_CONN_DOES_NOT_EXIST = 0x36,
     PDP_FAIL_MULTI_CONN_TO_SAME_PDN_NOT_ALLOWED = 0x37,
+    PDP_FAIL_COLLISION_WITH_NW_INITIATED_REQUEST = 0x38,  /* M */
+    PDP_FAIL_ESM_UNSUPPORTED_QCI_VALUE = 0x3B,  /* M */
+    PDP_FAIL_BEARER_HANDLING_NOT_SUPPORT = 0x3C,  /* M */
     PDP_FAIL_MAX_ACTIVE_PDP_CONTEXT_REACHED = 0x41,
     PDP_FAIL_UNSUPPORTED_APN_IN_CURRENT_PLMN = 0x42,
     PDP_FAIL_INVALID_TRANSACTION_ID = 0x51,
@@ -940,6 +991,12 @@ typedef enum {
     PDP_FAIL_IFACE_AND_POL_FAMILY_MISMATCH = 0x78,
     PDP_FAIL_EMM_ACCESS_BARRED_INFINITE_RETRY = 0x79,
     PDP_FAIL_AUTH_FAILURE_ON_EMERGENCY_CALL = 0x7A,
+
+    PDP_FAIL_LOCAL_REJECT_ACT_REQ_DUE_TO_REACH_RETRY_COUNTER = 0x0E0F,  /* M */
+    PDP_FAIL_TCM_ESM_TIMER_TIMEOUT = 0x0F46,  /* M */
+    PDP_FAIL_PAM_ATT_PDN_ACCESS_REJECT_IMS_PDN_BLOCK_TEMP = 0x1402,  /* M */
+
+    PDP_FAIL_DATA_NOT_ALLOW = 0x1671,  /* M */
 
     // OEM specific error codes. To be used by OEMs when they don't want to
     // reveal error code which would be replaced by PDP_FAIL_ERROR_UNSPECIFIED
@@ -972,6 +1029,10 @@ typedef enum {
     PDP_FAIL_TETHERED_CALL_ACTIVE = -6,   /* data call was disconnected by modem because tethered
                                              mode was up on same APN/data profile - no retry until
                                              tethered call is off */
+    PDP_FAIL_ROUTER_ADVERTISEMENT_FAIL = -7, /* for RA fail cause */
+
+    /* Common cause for PDN deactivation by framework or network */
+    PDP_FAIL_LOST_CONNECTION = 0x10004,
 
     PDP_FAIL_ERROR_UNSPECIFIED = 0xffff,  /* retry silently. Will be deprecated soon as
                                              new error codes are added making this unnecessary */
@@ -985,6 +1046,22 @@ typedef enum {
     RIL_DATA_PROFILE_FOTA       = 3,
     RIL_DATA_PROFILE_CBS        = 4,
     RIL_DATA_PROFILE_OEM_BASE   = 1000,    /* Start of OEM-specific profiles */
+    // MTK add
+    RIL_DATA_PROFILE_VENDOR_MMS        = RIL_DATA_PROFILE_OEM_BASE + 1,
+    RIL_DATA_PROFILE_VENDOR_SUPL       = RIL_DATA_PROFILE_OEM_BASE + 2,
+    RIL_DATA_PROFILE_VENDOR_HIPRI      = RIL_DATA_PROFILE_OEM_BASE + 3,
+    RIL_DATA_PROFILE_VENDOR_DM         = RIL_DATA_PROFILE_OEM_BASE + 4,
+    RIL_DATA_PROFILE_VENDOR_WAP        = RIL_DATA_PROFILE_OEM_BASE + 5,
+    RIL_DATA_PROFILE_VENDOR_NET        = RIL_DATA_PROFILE_OEM_BASE + 6,
+    RIL_DATA_PROFILE_VENDOR_CMMAIL     = RIL_DATA_PROFILE_OEM_BASE + 7,
+    RIL_DATA_PROFILE_VENDOR_RCSE       = RIL_DATA_PROFILE_OEM_BASE + 8,
+    RIL_DATA_PROFILE_VENDOR_EMERGENCY  = RIL_DATA_PROFILE_OEM_BASE + 9,
+    RIL_DATA_PROFILE_VENDOR_XCAP       = RIL_DATA_PROFILE_OEM_BASE + 10,
+    RIL_DATA_PROFILE_VENDOR_RCS        = RIL_DATA_PROFILE_OEM_BASE + 11,
+    RIL_DATA_PROFILE_VENDOR_BIP        = RIL_DATA_PROFILE_OEM_BASE + 12,
+    RIL_DATA_PROFILE_VENDOR_VSIM       = RIL_DATA_PROFILE_OEM_BASE + 13,
+    RIL_DATA_PROFILE_VENDOR_ALL        = RIL_DATA_PROFILE_OEM_BASE + 14,
+    // MTK end
     RIL_DATA_PROFILE_INVALID    = 0xFFFFFFFF
 } RIL_DataProfile;
 
@@ -1144,7 +1221,17 @@ typedef enum {
     /* SIM initialized.  All files should be re-read. */
     SIM_INIT = 1,
     /* SIM reset.  SIM power required, SIM may be locked and all files should be re-read. */
-    SIM_RESET = 2
+    SIM_RESET = 2,
+    // MTK add
+    /*ISIM application init*/
+    APP_INIT = 3,
+    /* SIM Initialization and Full File Change Notification */
+    SIM_INIT_FULL_FILE_CHANGE  = 4,
+    /* SIM Initialization and File Change Notification */
+    SIM_INIT_FILE_CHANGE = 5,
+    /* NAA Session reset*/
+    SESSION_RESET = 6
+    // MTK end
 } RIL_SimRefreshResult;
 
 typedef struct {
@@ -1369,8 +1456,8 @@ typedef struct {
     int mnc;    /* 2 or 3-digit Mobile Network Code, 0..999, INT_MAX if unknown */
     int lac;    /* 16-bit Location Area Code, 0..65535, INT_MAX if unknown  */
     int cid;    /* 16-bit GSM Cell Identity described in TS 27.007, 0..65535, INT_MAX if unknown  */
-    int arfcn;  /* 16-bit GSM Absolute RF channel number; this value must be reported */
-    uint8_t bsic; /* 6-bit Base Station Identity Code; 0xFF if unknown */
+    int arfcn;  /* 16-bit GSM Absolute RF channel number, INT_MAX if unknown */
+    uint8_t bsic;/* 6-bit Base Station Identity Code, 0xFF if unknown */
 } RIL_CellIdentityGsm_v12;
 
 typedef struct {
@@ -1386,8 +1473,8 @@ typedef struct {
     int mnc;    /* 2 or 3-digit Mobile Network Code, 0..999, INT_MAX if unknown  */
     int lac;    /* 16-bit Location Area Code, 0..65535, INT_MAX if unknown  */
     int cid;    /* 28-bit UMTS Cell Identity described in TS 25.331, 0..268435455, INT_MAX if unknown  */
-    int psc;    /* 9-bit UMTS Primary Scrambling Code described in TS 25.331, 0..511; this value must be reported */
-    int uarfcn; /* 16-bit UMTS Absolute RF Channel Number; this value must be reported */
+    int psc;    /* 9-bit UMTS Primary Scrambling Code described in TS 25.331, 0..511, INT_MAX if unknown */
+    int uarfcn; /* 16-bit UMTS Absolute RF Channel Number, INT_MAX if unknown */
 } RIL_CellIdentityWcdma_v12;
 
 typedef struct {
@@ -1417,9 +1504,9 @@ typedef struct {
     int mcc;    /* 3-digit Mobile Country Code, 0..999, INT_MAX if unknown  */
     int mnc;    /* 2 or 3-digit Mobile Network Code, 0..999, INT_MAX if unknown  */
     int ci;     /* 28-bit Cell Identity described in TS ???, INT_MAX if unknown */
-    int pci;    /* physical cell id 0..503; this value must be reported */
+    int pci;    /* physical cell id 0..503, INT_MAX if unknown  */
     int tac;    /* 16-bit tracking area code, INT_MAX if unknown  */
-    int earfcn; /* 18-bit LTE Absolute RF Channel Number; this value must be reported */
+    int earfcn; /* 18-bit LTE Absolute RC Channel Number, INT_MAX if unknown */
 } RIL_CellIdentityLte_v12;
 
 typedef struct {
@@ -1955,6 +2042,57 @@ typedef struct {
     char *mvnoMatchData;
 } RIL_DataProfileInfo_v15;
 
+typedef struct {
+    /* id of the data profile */
+    int profileId;
+    /* the APN to connect to */
+    char* apn;
+    /** one of the PDP_type values in TS 27.007 section 10.1.1.
+     * For example, "IP", "IPV6", "IPV4V6", or "PPP".
+     */
+    char* protocol;
+    /** one of the PDP_type values in TS 27.007 section 10.1.1 used on roaming network.
+     * For example, "IP", "IPV6", "IPV4V6", or "PPP".
+     */
+    char *roamingProtocol;
+    /** authentication protocol used for this PDP context
+     * (None: 0, PAP: 1, CHAP: 2, PAP&CHAP: 3)
+     */
+    int authType;
+    /* the username for APN, or NULL */
+    char* user;
+    /* the password for APN, or NULL */
+    char* password;
+    /* the profile type, TYPE_COMMON-0, TYPE_3GPP-1, TYPE_3GPP2-2 */
+    int type;
+    /* the period in seconds to limit the maximum connections */
+    int maxConnsTime;
+    /* the maximum connections during maxConnsTime */
+    int maxConns;
+    /** the required wait time in seconds after a successful UE initiated
+     * disconnect of a given PDN connection before the device can send
+     * a new PDN connection request for that given PDN
+     */
+    int waitTime;
+    /* true to enable the profile, 0 to disable, 1 to enable */
+    int enabled;
+    /* supported APN types bitmask. See RIL_ApnTypes for the value of each bit. */
+    int supportedTypesBitmask;
+    /** the bearer bitmask. See RIL_RadioAccessFamily for the value of each bit. */
+    int bearerBitmask;
+    /** maximum transmission unit (MTU) size in bytes */
+    int mtu;
+    /** the MVNO type: possible values are "imsi", "gid", "spn" */
+    char *mvnoType;
+    /** MVNO match data. Can be anything defined by the carrier. For example,
+     *        SPN like: "A MOBILE", "BEN NL", etc...
+     *        IMSI like: "302720x94", "2060188", etc...
+     *        GID like: "4E", "33", etc...
+     */
+    char *mvnoMatchData;
+    int inactiveTimer;
+} RIL_MtkDataProfileInfo;
+
 /* Tx Power Levels */
 #define RIL_NUM_TX_POWER_LEVELS     5
 
@@ -1998,7 +2136,27 @@ typedef enum {
     RIL_APN_TYPE_EMERGENCY    = 0x200,        // APN type for Emergency PDN. This is not an IA apn,
                                               // but is used for access to carrier services in an
                                               // emergency call situation.
-    RIL_APN_TYPE_ALL          = 0xFFFFFFFF    // All APN types
+
+    RIL_APN_TYPE_DM           = 0x400,        // APN type for DM
+    RIL_APN_TYPE_WAP          = 0x800,        // APN type for WAP
+    RIL_APN_TYPE_NET          = 0x1000,       // APN type for NET
+    RIL_APN_TYPE_CMMAIL       = 0x2000,       // APN type for CMMAIL
+    RIL_APN_TYPE_TETHERING    = 0x4000,       // APN type for TETHERING
+    RIL_APN_TYPE_RCSE         = 0x8000,       // APN type for RCSE
+    RIL_APN_TYPE_XCAP         = 0x10000,      // APN type for XCAP
+    RIL_APN_TYPE_RCS          = 0x20000,      // APN type for RCS
+    RIL_APN_TYPE_BIP          = 0x40000,      // APN type for BIP
+    RIL_APN_TYPE_VSIM         = 0x80000,      // APN type for VSIM
+
+    RIL_APN_TYPE_ALL          = RIL_APN_TYPE_DEFAULT | RIL_APN_TYPE_MMS | RIL_APN_TYPE_SUPL |
+                                RIL_APN_TYPE_DUN | RIL_APN_TYPE_HIPRI | RIL_APN_TYPE_FOTA |
+                                RIL_APN_TYPE_IMS | RIL_APN_TYPE_CBS | RIL_APN_TYPE_IA |
+                                RIL_APN_TYPE_EMERGENCY,
+
+    RIL_APN_TYPE_MTKALL       = RIL_APN_TYPE_ALL | RIL_APN_TYPE_DM | RIL_APN_TYPE_WAP |
+                                RIL_APN_TYPE_NET | RIL_APN_TYPE_CMMAIL | RIL_APN_TYPE_TETHERING |
+                                RIL_APN_TYPE_RCSE | RIL_APN_TYPE_XCAP | RIL_APN_TYPE_RCS |
+                                RIL_APN_TYPE_BIP | RIL_APN_TYPE_VSIM
 } RIL_ApnTypes;
 
 typedef enum {
@@ -7124,6 +7282,7 @@ typedef struct {
                                      SPN like: "A MOBILE", "BEN NL", etc...
                                      IMSI like: "302720x94", "2060188", etc...
                                      GID like: "4E", "33", etc... */
+    int canHandleIms;           /* if the APN can handle IMS */
 } RIL_InitialAttachApn_v15;
 
 typedef struct {
@@ -7177,6 +7336,93 @@ typedef struct {
     RIL_KeepaliveStatusCode code;
 } RIL_KeepaliveStatus;
 
+#ifndef C2K_RIL
+
+typedef enum {
+    RIL_URC,
+    RIL_CMD_1,
+    RIL_CMD_2,
+    RIL_CMD_3,
+    RIL_CMD_4, /* split data and nw command channel */
+    RIL_ATCI,
+#ifdef MTK_MUX_CHANNEL_64
+    RIL_CMD_7,
+    RIL_CMD_8,
+    RIL_CMD_9,
+    RIL_CMD_10,
+    RIL_CMD_11,
+#endif
+#ifdef MTK_IMS_CHANNEL_SUPPORT
+    RIL_CMD_IMS,
+#endif
+    RIL_CHANNEL_OFFSET,
+
+    RIL_URC2 = RIL_CHANNEL_OFFSET,
+    RIL_CMD2_1,
+    RIL_CMD2_2,
+    RIL_CMD2_3,
+    RIL_CMD2_4, /* split data and nw command channel */
+    RIL_ATCI2,
+#ifdef MTK_MUX_CHANNEL_64
+    RIL_CMD2_7,
+    RIL_CMD2_8,
+    RIL_CMD2_9,
+    RIL_CMD2_10,
+    RIL_CMD2_11,
+#endif
+#ifdef MTK_IMS_CHANNEL_SUPPORT
+    RIL_CMD2_IMS,
+#endif
+    RIL_CHANNEL_SET3_OFFSET,
+    RIL_URC3 = RIL_CHANNEL_SET3_OFFSET,
+    RIL_CMD3_1,
+    RIL_CMD3_2,
+    RIL_CMD3_3,
+    RIL_CMD3_4,
+    RIL_ATCI3,
+#ifdef MTK_MUX_CHANNEL_64
+    RIL_CMD3_7,
+    RIL_CMD3_8,
+    RIL_CMD3_9,
+    RIL_CMD3_10,
+    RIL_CMD3_11,
+#endif
+#ifdef MTK_IMS_CHANNEL_SUPPORT
+    RIL_CMD3_IMS,
+#endif
+    RIL_CHANNEL_SET4_OFFSET,
+    RIL_URC4 = RIL_CHANNEL_SET4_OFFSET,
+    RIL_CMD4_1,
+    RIL_CMD4_2,
+    RIL_CMD4_3,
+    RIL_CMD4_4,
+    RIL_ATCI4,
+#ifdef MTK_MUX_CHANNEL_64
+    RIL_CMD4_7,
+    RIL_CMD4_8,
+    RIL_CMD4_9,
+    RIL_CMD4_10,
+    RIL_CMD4_11,
+#endif
+#ifdef MTK_IMS_CHANNEL_SUPPORT
+    RIL_CMD4_IMS,
+#endif
+    RIL_SUPPORT_CHANNELS
+} RILChannelId;
+#else
+typedef enum {
+    URC_CHANNEL,
+    SIM_CHANNEL,
+    CC_CHANNEL,
+    NW_CHANNEL,
+    DATA_CHANNEL,
+    SMS_CHANNEL,
+    ATCI_CHANNEL,
+    DEFAULT_CHANNEL,
+    RIL_SUPPORT_CHANNELS
+} RILChannelId;
+#endif
+
 #ifdef RIL_SHLIB
 struct RIL_Env {
     /**
@@ -7227,6 +7473,22 @@ struct RIL_Env {
     * by them and an ack needs to be sent back to java ril.
     */
     void (*OnRequestAck) (RIL_Token t);
+
+    /**
+     * Same propose as RequestTimedCallback but executed in proxy thread
+     */
+    void (*RequestProxyTimedCallback) (RIL_TimedCallback callback, void *param,
+            const struct timeval *relativeTime, int proxyId);
+
+    /**
+     * Query Context from RIL_Token
+     */
+    RILChannelId (*QueryMyChannelId) (RIL_Token t);
+
+    /**
+     * Query current proxy according to thread
+     */
+    int (*QueryMyProxyIdByThread)();
 };
 
 
